@@ -151,7 +151,38 @@ with open(args.output, writeModes) as csvfile:
                 setp = con.send_input_setup(setp_names, setp_types)
 
                 # Setpoints to move the robot to
-                setp1 = [0.58, 0.47, 0.41, 1.5, -2.9, 0.18]
+                new_setp = [0.58, 0.47, 0.41, 1.5, -2.9, 0.18]
+
+                setp.input_double_register_0 = 0
+
+                def list_to_setp(sp, list):
+                    for i in range(0, 6):
+                        sp.__dict__["input_double_register_%i" % i] = list[i]
+                    return sp
+
+                # start data synchronization
+                if not con.send_start():
+                    sys.exit()
+
+                # control loop
+                move_completed = True
+                while keep_running:
+                    # receive the current state
+                    state = con.receive()
+
+                    if state is None:
+                        break
+
+                 # do something...
+                if move_completed and state.output_int_register_0 == 1:
+                    move_completed = False
+                    list_to_setp(setp, new_setp)
+                    print("New pose = " + str(new_setp))
+                    # send new setpoint
+                    con.send(setp)
+                elif not move_completed and state.output_int_register_0 == 0:
+                    print("Move to confirmed pose = " + str(state.target_q))
+                    move_completed = True
 
         except KeyboardInterrupt:
             keep_running = False
