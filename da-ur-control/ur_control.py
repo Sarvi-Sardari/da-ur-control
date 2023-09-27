@@ -22,22 +22,25 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import rtde.csv_binary_writer as csv_binary_writer
+import rtde.csv_writer as csv_writer
+import rtde.rtde_config as rtde_config
+import rtde.rtde as rtde
 import argparse
 import logging
 import sys
+import onnx
+import onnxruntime as rt
 
 sys.path.append("..")
-import rtde.rtde as rtde
-import rtde.rtde_config as rtde_config
-import rtde.csv_writer as csv_writer
-import rtde.csv_binary_writer as csv_binary_writer
 
 # parameters
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--host", default="localhost", help="name of host to connect to (localhost)"
 )
-parser.add_argument("--port", type=int, default=30004, help="port number (30004)")
+parser.add_argument("--port", type=int, default=30004,
+                    help="port number (30004)")
 parser.add_argument(
     "--samples", type=int, default=0, help="number of samples to record"
 )
@@ -46,7 +49,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--config",
-    default="record_configuration.xml",
+    default="combine_record_and_control_loop_configuration.xml",
     help="data configuration file to use (record_configuration.xml)",
 )
 parser.add_argument(
@@ -54,7 +57,8 @@ parser.add_argument(
     default="robot_data.csv",
     help="data output file to write to (robot_data.csv)",
 )
-parser.add_argument("--verbose", help="increase output verbosity", action="store_true")
+parser.add_argument(
+    "--verbose", help="increase output verbosity", action="store_true")
 parser.add_argument(
     "--buffered",
     help="Use buffered receive which doesn't skip data",
@@ -82,6 +86,10 @@ if not con.send_output_setup(output_names, output_types, frequency=args.frequenc
     logging.error("Unable to configure output")
     sys.exit()
 
+# load onnx model
+onnx_model = onnx.load("fashion_mnist_model.onnx")
+onnx.checker.check_model(onnx_model)
+
 # start data synchronization
 if not con.send_start():
     logging.error("Unable to start synchronization")
@@ -92,7 +100,8 @@ with open(args.output, writeModes) as csvfile:
     writer = None
 
     if args.binary:
-        writer = csv_binary_writer.CSVBinaryWriter(csvfile, output_names, output_types)
+        writer = csv_binary_writer.CSVBinaryWriter(
+            csvfile, output_names, output_types)
     else:
         writer = csv_writer.CSVWriter(csvfile, output_names, output_types)
 
@@ -105,7 +114,8 @@ with open(args.output, writeModes) as csvfile:
         if i % args.frequency == 0:
             if args.samples > 0:
                 sys.stdout.write("\r")
-                sys.stdout.write("{:.2%} done.".format(float(i) / float(args.samples)))
+                sys.stdout.write("{:.2%} done.".format(
+                    float(i) / float(args.samples)))
                 sys.stdout.flush()
             else:
                 sys.stdout.write("\r")
@@ -124,13 +134,24 @@ with open(args.output, writeModes) as csvfile:
 
                 # OUR CODE:
                 # Get input from robot
-                TCP_pose = state.__dict__["actual_TCP_pose"] # VECTOR6D
-                TCP_force = state.__dict__["actual_TCP_force"] # VECTOR6D
-                TCP_speed = state.__dict__["actual_TCP_speed"] # VECTOR6D
+                TCP_pose = state.__dict__["actual_TCP_pose"]  # VECTOR6D
+                TCP_force = state.__dict__["actual_TCP_force"]  # VECTOR6D
+                TCP_speed = state.__dict__["actual_TCP_speed"]  # VECTOR6D
 
                 # ONNX inference and output actions
 
                 # Send actions back to Robot
+
+                state_names, state_types = conf.get_recipe("state")
+                setp_names, setp_types = conf.get_recipe("setp")
+                watchdog_names, watchdog_types = conf.get_recipe("watchdog")
+
+                # setup recipes
+                con.send_output_setup(state_names, state_types)
+                setp = con.send_input_setup(setp_names, setp_types)
+
+                # Setpoints to move the robot to
+                setp1 = [0.58, 0.47, 0.41, 1.5, -2.9, 0.18]
 
         except KeyboardInterrupt:
             keep_running = False
